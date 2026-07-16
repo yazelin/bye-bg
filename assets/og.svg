@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#14161c"/>
+  <rect width="1200" height="6" fill="#f5a524"/>
+  <g transform="translate(92,86)">
+    <g fill="#2b2f3a">
+      <rect width="30" height="30"/><rect x="60" width="30" height="30"/><rect x="120" width="30" height="30"/>
+      <rect x="30" y="30" width="30" height="30"/><rect x="90" y="30" width="30" height="30"/>
+      <rect y="60" width="30" height="30"/><rect x="60" y="60" width="30" height="30"/><rect x="120" y="60" width="30" height="30"/>
+      <rect x="30" y="90" width="30" height="30"/><rect x="90" y="90" width="30" height="30"/>
+    </g>
+    <circle cx="75" cy="52" r="26" fill="#f5a524"/>
+    <path d="M33 120 a42 42 0 0 1 84 0 Z" fill="#f5a524"/>
+  </g>
+  <text x="92" y="340" font-family="Noto Sans CJK TC" font-weight="700" font-size="104" fill="#f3f4f6">瀏覽器去背</text>
+  <text x="92" y="425" font-family="Noto Sans CJK TC" font-size="42" fill="#9aa1ad">AI 在你的瀏覽器裡跑——圖不上傳、免排隊、免註冊</text>
+  <text x="92" y="560" font-family="Noto Sans CJK TC" font-size="30" fill="#6b7280">yazelin.github.io/bye-bg</text>
+</svg>
