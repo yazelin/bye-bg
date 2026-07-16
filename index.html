@@ -43,6 +43,7 @@ header.site h1 { margin: 0; font-size: 1.9rem; letter-spacing: .05em; }
 header.site .tagline { color: var(--muted); margin: 8px 0 0; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin: 16px 0; }
 #drop {
+  display: block;
   border: 2px dashed var(--line); border-radius: 14px; padding: 44px 20px; text-align: center;
   color: var(--muted); cursor: pointer; transition: border-color .15s;
 }
@@ -93,6 +94,15 @@ a { color: var(--accent); }
       <span class="note">首次使用會下載 4.6MB 模型(只下載一次,瀏覽器會快取)</span>
     </label>
     <div class="bar">
+      <span class="note">去背方式:</span>
+      <label class="opt"><input type="radio" name="method" value="auto" checked>自動判斷</label>
+      <label class="opt"><input type="radio" name="method" value="chroma">單色背景(AI 生圖/棚拍)</label>
+      <label class="opt"><input type="radio" name="method" value="ml">AI 模型(一般照片)</label>
+      <label class="opt" id="tolwrap" hidden>容差
+        <input type="range" id="tol" min="8" max="120" value="34" style="width:120px">
+      </label>
+    </div>
+    <div class="bar">
       <span id="status">選一張圖開始。</span>
     </div>
 
@@ -119,7 +129,8 @@ a { color: var(--accent); }
   </section>
 
   <section class="panel note">
-    <strong>誠實說明:</strong>這是 4.6MB 的輕量模型(U2Net-p),商品、人物、動物等主體明確的圖效果好,髮絲、半透明等細節有限。
+    <strong>怎麼選:</strong>AI 生圖、棚拍等<strong>單色背景</strong>的圖,色鍵模式最乾淨(自動判斷會直接選它,免下載模型,拉容差微調邊緣);
+    背景雜的一般照片才用 AI 模型(4.6MB 輕量 U2Net-p,主體明確效果好,髮絲、半透明細節有限)。
     需要頂級精度可用
     <a href="https://huggingface.co/spaces/ZhengPeng7/BiRefNet_demo" rel="noopener">BiRefNet 線上 demo</a>(要排隊、圖會上傳)。
     蝦皮、momo 商品主圖要白底,選「白底」再下載即可。
@@ -214,9 +225,67 @@ function ensureSession() {
   return session;
 }
 
+// 取邊框像素:估背景色與「背景是否夠單色」
+function analyzeBorder(bitmap) {
+  const S = 96;
+  const c = document.createElement('canvas');
+  c.width = S; c.height = S;
+  const cx = c.getContext('2d');
+  cx.drawImage(bitmap, 0, 0, S, S);
+  const d = cx.getImageData(0, 0, S, S).data;
+  const px = [];
+  for (let i = 0; i < S; i++) {
+    for (const [x, y] of [[i, 0], [i, S - 1], [0, i], [S - 1, i]]) {
+      const o = (y * S + x) * 4;
+      px.push([d[o], d[o + 1], d[o + 2]]);
+    }
+  }
+  const mean = [0, 1, 2].map((ch) => px.reduce((a, p) => a + p[ch], 0) / px.length);
+  const mad = px.reduce((a, p) => a + (Math.abs(p[0] - mean[0]) + Math.abs(p[1] - mean[1]) + Math.abs(p[2] - mean[2])) / 3, 0) / px.length;
+  return { color: mean, mad };
+}
+
+// 色鍵去背:與背景色的距離 → alpha(邊緣平滑過渡)
+function chromaAlpha(bitmap, bg, tol) {
+  const W = bitmap.width, H = bitmap.height;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const cx = c.getContext('2d');
+  cx.drawImage(bitmap, 0, 0);
+  const img = cx.getImageData(0, 0, W, H);
+  const d = img.data;
+  const t0 = tol, t1 = tol * 1.8;
+  for (let i = 0; i < W * H; i++) {
+    const o = i * 4;
+    const dist = Math.sqrt(
+      (d[o] - bg[0]) ** 2 + (d[o + 1] - bg[1]) ** 2 + (d[o + 2] - bg[2]) ** 2
+    );
+    d[o + 3] = dist <= t0 ? 0 : dist >= t1 ? 255 : Math.round((dist - t0) / (t1 - t0) * 255);
+  }
+  return d; // RGBA,alpha 即遮罩
+}
+
+function currentMethod() { return document.querySelector('input[name=method]:checked').value; }
+
 async function removeBg(bitmap) {
+  let method = currentMethod();
+  const border = analyzeBorder(bitmap);
+  // 門檻要嚴:AI 生圖/棚拍單色底 mad 通常 <5,均勻色調的實景(如叢林)可到 10+,誤走色鍵會切爛照片
+  if (method === 'auto') method = border.mad < 8 ? 'chroma' : 'ml';
+  $('tolwrap').hidden = method !== 'chroma';
+
+  if (method === 'chroma') {
+    setStatus('單色背景——用色鍵去背(不需下載模型)…');
+    await new Promise((r) => setTimeout(r, 30));
+    lastAlpha = chromaAlpha(bitmap, border.color, +$('tol').value);
+    lastBitmap = bitmap;
+    renderResult();
+    setStatus('完成(色鍵模式,可拉容差微調)。', 'ok');
+    return;
+  }
+
   const s = await ensureSession();
-  setStatus('去背運算中…');
+  setStatus('AI 去背運算中…');
   await new Promise((r) => setTimeout(r, 30)); // 讓狀態先畫出來
 
   // 前處理:320×320 + 正規化,NCHW
@@ -259,7 +328,7 @@ async function removeBg(bitmap) {
   lastAlpha = bcx.getImageData(0, 0, W, H).data;
   lastBitmap = bitmap;
   renderResult();
-  setStatus('完成。要換圖直接再拖一張進來。', 'ok');
+  setStatus('完成(AI 模式)。要換圖直接再拖一張進來。', 'ok');
 }
 
 function bgMode() { return document.querySelector('input[name=bgmode]:checked').value; }
@@ -322,6 +391,14 @@ document.addEventListener('paste', (e) => {
   if (f) handleFile(f.getAsFile());
 });
 document.querySelectorAll('input[name=bgmode]').forEach((r) => r.addEventListener('change', renderResult));
+document.querySelectorAll('input[name=method]').forEach((r) =>
+  r.addEventListener('change', () => { if (lastBitmap) removeBg(lastBitmap); })
+);
+let tolTimer = null;
+$('tol').addEventListener('input', () => {
+  clearTimeout(tolTimer);
+  tolTimer = setTimeout(() => { if (lastBitmap) removeBg(lastBitmap); }, 150);
+});
 $('bgcolor').addEventListener('input', () => {
   document.querySelector('input[name=bgmode][value=color]').checked = true;
   renderResult();
